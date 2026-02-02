@@ -3,19 +3,19 @@ import asyncio
 from bot import build_app
 
 app = Flask(__name__)
-
 telegram_app = build_app()
 
-@app.before_first_request
-def start_bot():
-    asyncio.get_event_loop().create_task(telegram_app.initialize())
-    asyncio.get_event_loop().create_task(telegram_app.start())
-    asyncio.get_event_loop().create_task(telegram_app.bot.initialize())
-    asyncio.get_event_loop().create_task(telegram_app.updater.start_polling())
+async def start_bot():
+    await telegram_app.initialize()
+    await telegram_app.start()
+    await telegram_app.bot.initialize()
+    await telegram_app.updater.start_polling()
 
 @app.route("/")
 def home():
     return "Bot is running"
 
 if __name__ == "__main__":
+    loop = asyncio.get_event_loop()
+    loop.create_task(start_bot())
     app.run(host="0.0.0.0", port=8080)
