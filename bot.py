@@ -18,15 +18,17 @@ from telegram.ext import (
 from telegram.constants import ChatType
 
 
-# ================= CONFIG =================
+# ================== CONFIG ==================
 BOT_TOKEN = "8574592475:AAFfarKG2o8OzBtykXr4bzFPolHVgQEBbKc"
 ADMIN_ID = 6474515118
 GROUP_ID = -1003614589024
+
 DATABASE_URL = os.environ.get("DATABASE_URL")
 PORT = int(os.environ.get("PORT", 10000))
+BASE_URL = "https://nashenas-71cn.onrender.com"
 
 
-# ================= DATABASE =================
+# ================== DATABASE ==================
 def get_db():
     return psycopg2.connect(DATABASE_URL, sslmode="require")
 
@@ -46,7 +48,10 @@ def init_db():
 def get_user(user_id):
     with get_db() as conn:
         with conn.cursor(cursor_factory=DictCursor) as cur:
-            cur.execute("SELECT * FROM users WHERE user_id=%s", (user_id,))
+            cur.execute(
+                "SELECT * FROM users WHERE user_id = %s",
+                (user_id,)
+            )
             return cur.fetchone()
 
 
@@ -57,12 +62,12 @@ def set_nickname(user_id, nickname):
                 INSERT INTO users (user_id, nickname)
                 VALUES (%s, %s)
                 ON CONFLICT (user_id)
-                DO UPDATE SET nickname=EXCLUDED.nickname
+                DO UPDATE SET nickname = EXCLUDED.nickname
             """, (user_id, nickname))
         conn.commit()
 
 
-# ================= HANDLERS =================
+# ================== HANDLERS ==================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.effective_chat.type != ChatType.PRIVATE:
         return
@@ -72,9 +77,10 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if user:
         await update.message.reply_text(
             f"👋 خوش اومدی!\n\n"
-            f"لقب فعلی تو:\n"
+            f"🕶 لقب فعلی تو:\n"
             f"🔹 {user['nickname']}\n\n"
-            f"هر پیامی بفرستی بعد از تأیید ادمین، ناشناس تو گروه منتشر می‌شه.",
+            f"هر پیامی بفرستی بعد از تأیید ادمین، "
+            f"به‌صورت ناشناس تو گروه منتشر می‌شه.",
             reply_markup=InlineKeyboardMarkup([
                 [InlineKeyboardButton("✏️ تغییر لقب", callback_data="change_nick")]
             ])
@@ -83,9 +89,9 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.user_data["awaiting_nick"] = True
         await update.message.reply_text(
             "👋 سلام!\n\n"
-            "این ربات پیام‌هات رو **به‌صورت ناشناس** تو گروه منتشر می‌کنه.\n\n"
-            "🕶 لطفاً یک **لقب ناشناس** برای خودت انتخاب کن.\n"
-            "⚠️ این لقب پیش‌فرض دائمیه (ولی بعداً می‌تونی عوضش کنی)."
+            "این ربات پیام‌هات رو **ناشناس** تو گروه منتشر می‌کنه.\n\n"
+            "🕶 لطفاً یک لقب ناشناس انتخاب کن.\n"
+            "⚠️ این لقب پیش‌فرض دائمیه (ولی بعداً می‌تونی تغییرش بدی)."
         )
 
 
@@ -104,7 +110,8 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             f"✅ لقبت ثبت شد:\n"
             f"🔹 {text}\n\n"
-            f"از حالا هر پیامی بفرستی، بعد از تأیید ادمین تو گروه منتشر می‌شه."
+            f"از حالا هر پیامی بفرستی، "
+            f"بعد از تأیید ادمین تو گروه منتشر می‌شه."
         )
         return
 
@@ -114,13 +121,19 @@ async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("اول باید یه لقب انتخاب کنی ✍️")
         return
 
-    # ارسال پیام برای ادمین (فوروارد)
+    # فوروارد پیام به ادمین (با پروفایل واقعی)
     forwarded = await update.message.forward(chat_id=ADMIN_ID)
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ تأیید", callback_data=f"approve:{forwarded.message_id}:{user_id}"),
-            InlineKeyboardButton("❌ رد", callback_data=f"reject:{forwarded.message_id}:{user_id}")
+            InlineKeyboardButton(
+                "✅ تأیید",
+                callback_data=f"approve:{forwarded.message_id}:{user_id}"
+            ),
+            InlineKeyboardButton(
+                "❌ رد",
+                callback_data=f"reject:{forwarded.message_id}:{user_id}"
+            )
         ]
     ])
 
@@ -144,7 +157,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.message.reply_text("✏️ لقب جدیدتو بفرست:")
         return
 
-    # فقط ادمین
+    # فقط ادمین اجازه دارد
     if update.effective_user.id != ADMIN_ID:
         return
 
@@ -155,9 +168,8 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not user:
         return
 
-    # متن پیام اصلی
-    forwarded_msg = query.message.reply_to_message
-    text = forwarded_msg.text or forwarded_msg.caption or ""
+    original_msg = query.message.reply_to_message
+    text = original_msg.text or original_msg.caption or ""
 
     if action == "approve":
         await context.bot.send_message(
@@ -168,7 +180,6 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=user_id,
             text="✅ پیامت تأیید شد و تو گروه منتشر شد."
         )
-
     else:
         await context.bot.send_message(
             chat_id=user_id,
@@ -178,7 +189,7 @@ async def callbacks(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await query.edit_message_reply_markup(reply_markup=None)
 
 
-# ================= MAIN =================
+# ================== MAIN ==================
 def main():
     init_db()
 
@@ -191,7 +202,8 @@ def main():
     app.run_webhook(
         listen="0.0.0.0",
         port=PORT,
-        webhook_url=f"https://nashenas-71cn.onrender.com/webhook"
+        url_path="webhook",
+        webhook_url=f"{BASE_URL}/webhook",
     )
 
 
