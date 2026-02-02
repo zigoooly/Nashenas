@@ -1,7 +1,7 @@
 from telegram import (
     Update,
-    InlineKeyboardButton,
-    InlineKeyboardMarkup
+    InlineKeyboardMarkup,
+    InlineKeyboardButton
 )
 from telegram.ext import (
     Application,
@@ -20,15 +20,8 @@ GROUP_ID = -1003614589024
 
 init_db()
 
-ASK_NICK = {}
-CHANGE_NICK = {}
-
-WELCOME = (
-    "سلام 👋\n\n"
-    "🤖 این ربات برای ارسال *پیام ناشناس* به گروهه.\n\n"
-    "🧩 لطفاً یه لقب ناشناس برای خودت انتخاب کن.\n"
-    "🔒 این لقب بالای پیام‌هات نمایش داده میشه."
-)
+WAITING_FOR_NICK = set()
+WAITING_FOR_NEW_NICK = set()
 
 def main_keyboard():
     return InlineKeyboardMarkup([
@@ -41,22 +34,29 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if nick:
         await update.message.reply_text(
-            f"خوش اومدی 🌱\n\n"
+            f"👋 خوش اومدی\n\n"
             f"🕶 لقب فعلی تو: *{nick}*\n\n"
-            "هر پیامی بفرستی بعد از تأیید منتشر میشه.",
+            "هر پیامی بفرستی بعد از تأیید ادمین توی گروه منتشر میشه.",
             parse_mode="Markdown",
             reply_markup=main_keyboard()
         )
     else:
-        ASK_NICK[uid] = True
-        await update.message.reply_text(WELCOME, parse_mode="Markdown")
+        WAITING_FOR_NICK.add(uid)
+        await update.message.reply_text(
+            "سلام 👋\n\n"
+            "🤖 این ربات برای ارسال پیام *ناشناس* به گروهه.\n\n"
+            "✍️ لطفاً یه لقب ناشناس برای خودت بفرست.\n"
+            "🔒 این لقب دائمیه ولی می‌تونی تغییرش بدی.",
+            parse_mode="Markdown"
+        )
 
-async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
 
     # ثبت لقب اولیه
-    if ASK_NICK.pop(uid, False):
+    if uid in WAITING_FOR_NICK:
+        WAITING_FOR_NICK.remove(uid)
         set_nickname(uid, text)
         await update.message.reply_text(
             f"✅ لقبت ثبت شد:\n*{text}*",
@@ -66,24 +66,24 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
 
     # تغییر لقب
-    if CHANGE_NICK.pop(uid, False):
+    if uid in WAITING_FOR_NEW_NICK:
+        WAITING_FOR_NEW_NICK.remove(uid)
         set_nickname(uid, text)
         await update.message.reply_text(
-            f"✏️ لقبت با موفقیت تغییر کرد:\n*{text}*",
+            f"✏️ لقبت تغییر کرد:\n*{text}*",
             parse_mode="Markdown",
             reply_markup=main_keyboard()
         )
         return
 
-    # پیام ناشناس
     nickname = get_nickname(uid)
     if not nickname:
-        ASK_NICK[uid] = True
+        WAITING_FOR_NICK.add(uid)
         await update.message.reply_text("اول باید یه لقب انتخاب کنی ✍️")
         return
 
-    # فوروارد به ادمین (پروفایل معلوم)
-    forwarded = await context.bot.forward_message(
+    # فوروارد پیام به ادمین (پروفایل معلوم)
+    await context.bot.forward_message(
         chat_id=ADMIN_ID,
         from_chat_id=uid,
         message_id=update.message.message_id
@@ -91,8 +91,8 @@ async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     keyboard = InlineKeyboardMarkup([
         [
-            InlineKeyboardButton("✅ تأیید", callback_data=f"ok|{uid}|{text}"),
-            InlineKeyboardButton("❌ رد", callback_data=f"no|{uid}")
+            InlineKeyboardButton("✅ تأیید", callback_data=f"approve|{uid}|{text}"),
+            InlineKeyboardButton("❌ رد", callback_data=f"reject|{uid}")
         ]
     ])
 
@@ -111,14 +111,14 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data.split("|")
 
     if data[0] == "change_nick":
-        CHANGE_NICK[q.from_user.id] = True
+        WAITING_FOR_NEW_NICK.add(q.from_user.id)
         await q.message.reply_text("✍️ لقب جدیدتو بفرست")
         return
 
     action = data[0]
     uid = int(data[1])
 
-    if action == "ok":
+    if action == "approve":
         text = data[2]
         nick = get_nickname(uid)
 
@@ -129,23 +129,21 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         await context.bot.send_message(
             chat_id=uid,
-            text="✅ پیامت تأیید و منتشر شد"
+            text="✅ پیامت تأیید شد و توی گروه منتشر شد"
         )
 
-        await q.edit_message_text("✅ ارسال شد")
+        await q.edit_message_text("✅ پیام ارسال شد")
 
-    elif action == "no":
+    elif action == "reject":
         await context.bot.send_message(
             chat_id=uid,
             text="❌ پیامت رد شد"
         )
-        await q.edit_message_text("❌ رد شد")
+        await q.edit_message_text("❌ پیام رد شد")
 
-def build_app():
-    app = Application.builder().token(BOT_TOKEN).build()
+# اپلیکیشن سراسری (برای webhook)
+application = Application.builder().token(BOT_TOKEN).build()
 
-    app.add_handler(CommandHandler("start", start))
-    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
-    app.add_handler(CallbackQueryHandler(buttons))
-
-    return app
+application.add_handler(CommandHandler("start", start))
+application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
+application.add_handler(CallbackQueryHandler(buttons))
