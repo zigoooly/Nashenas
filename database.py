@@ -1,5 +1,5 @@
-import psycopg2
 import os
+import psycopg2
 
 DATABASE_URL = os.getenv("DATABASE_URL")
 
@@ -9,14 +9,12 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
-
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         user_id BIGINT PRIMARY KEY,
         nickname TEXT NOT NULL
     );
     """)
-
     conn.commit()
     cur.close()
     conn.close()
