@@ -1,15 +1,12 @@
-from telegram import (
-    Update,
-    InlineKeyboardMarkup,
-    InlineKeyboardButton
-)
+import os
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
     Application,
     CommandHandler,
     MessageHandler,
     CallbackQueryHandler,
     ContextTypes,
-    filters
+    filters,
 )
 
 from database import init_db, get_nickname, set_nickname
@@ -17,13 +14,14 @@ from database import init_db, get_nickname, set_nickname
 BOT_TOKEN = "8574592475:AAFfarKG2o8OzBtykXr4bzFPolHVgQEBbKc"
 ADMIN_ID = 6474515118
 GROUP_ID = -1003614589024
+PORT = int(os.environ.get("PORT", 8080))
 
 init_db()
 
-WAITING_FOR_NICK = set()
-WAITING_FOR_NEW_NICK = set()
+WAIT_NICK = set()
+WAIT_NEW_NICK = set()
 
-def main_keyboard():
+def keyboard():
     return InlineKeyboardMarkup([
         [InlineKeyboardButton("✏️ تغییر لقب", callback_data="change_nick")]
     ])
@@ -34,91 +32,80 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if nick:
         await update.message.reply_text(
-            f"👋 خوش اومدی\n\n"
-            f"🕶 لقب فعلی تو: *{nick}*\n\n"
-            "هر پیامی بفرستی بعد از تأیید ادمین توی گروه منتشر میشه.",
+            f"🕶 لقب فعلی تو: *{nick}*",
             parse_mode="Markdown",
-            reply_markup=main_keyboard()
+            reply_markup=keyboard()
         )
     else:
-        WAITING_FOR_NICK.add(uid)
+        WAIT_NICK.add(uid)
         await update.message.reply_text(
             "سلام 👋\n\n"
-            "🤖 این ربات برای ارسال پیام *ناشناس* به گروهه.\n\n"
-            "✍️ لطفاً یه لقب ناشناس برای خودت بفرست.\n"
-            "🔒 این لقب دائمیه ولی می‌تونی تغییرش بدی.",
+            "✍️ یه لقب ناشناس برای خودت بفرست",
             parse_mode="Markdown"
         )
 
-async def handle_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     text = update.message.text
 
-    # ثبت لقب اولیه
-    if uid in WAITING_FOR_NICK:
-        WAITING_FOR_NICK.remove(uid)
+    if uid in WAIT_NICK:
+        WAIT_NICK.remove(uid)
         set_nickname(uid, text)
         await update.message.reply_text(
-            f"✅ لقبت ثبت شد:\n*{text}*",
+            f"✅ لقبت ثبت شد: *{text}*",
             parse_mode="Markdown",
-            reply_markup=main_keyboard()
+            reply_markup=keyboard()
         )
         return
 
-    # تغییر لقب
-    if uid in WAITING_FOR_NEW_NICK:
-        WAITING_FOR_NEW_NICK.remove(uid)
+    if uid in WAIT_NEW_NICK:
+        WAIT_NEW_NICK.remove(uid)
         set_nickname(uid, text)
         await update.message.reply_text(
-            f"✏️ لقبت تغییر کرد:\n*{text}*",
+            f"✏️ لقبت تغییر کرد: *{text}*",
             parse_mode="Markdown",
-            reply_markup=main_keyboard()
+            reply_markup=keyboard()
         )
         return
 
-    nickname = get_nickname(uid)
-    if not nickname:
-        WAITING_FOR_NICK.add(uid)
-        await update.message.reply_text("اول باید یه لقب انتخاب کنی ✍️")
+    nick = get_nickname(uid)
+    if not nick:
+        WAIT_NICK.add(uid)
+        await update.message.reply_text("اول یه لقب بفرست ✍️")
         return
 
-    # فوروارد پیام به ادمین (پروفایل معلوم)
     await context.bot.forward_message(
         chat_id=ADMIN_ID,
         from_chat_id=uid,
         message_id=update.message.message_id
     )
 
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ تأیید", callback_data=f"approve|{uid}|{text}"),
-            InlineKeyboardButton("❌ رد", callback_data=f"reject|{uid}")
-        ]
-    ])
-
     await context.bot.send_message(
         chat_id=ADMIN_ID,
-        text=f"🕶 لقب: {nickname}",
-        reply_markup=keyboard
+        text=f"🕶 لقب: {nick}",
+        reply_markup=InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("✅ تأیید", callback_data=f"ok|{uid}|{text}"),
+                InlineKeyboardButton("❌ رد", callback_data=f"no|{uid}")
+            ]
+        ])
     )
 
-    await update.message.reply_text("⏳ پیامت برای بررسی ارسال شد")
+    await update.message.reply_text("⏳ ارسال شد برای بررسی")
 
 async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     await q.answer()
-
     data = q.data.split("|")
 
     if data[0] == "change_nick":
-        WAITING_FOR_NEW_NICK.add(q.from_user.id)
-        await q.message.reply_text("✍️ لقب جدیدتو بفرست")
+        WAIT_NEW_NICK.add(q.from_user.id)
+        await q.message.reply_text("✍️ لقب جدید رو بفرست")
         return
 
-    action = data[0]
     uid = int(data[1])
 
-    if action == "approve":
+    if data[0] == "ok":
         text = data[2]
         nick = get_nickname(uid)
 
@@ -126,24 +113,27 @@ async def buttons(update: Update, context: ContextTypes.DEFAULT_TYPE):
             chat_id=GROUP_ID,
             text=f"🕶 {nick} گفت:\n{text}"
         )
+        await context.bot.send_message(uid, "✅ پیامت منتشر شد")
+        await q.edit_message_text("✅ ارسال شد")
 
-        await context.bot.send_message(
-            chat_id=uid,
-            text="✅ پیامت تأیید شد و توی گروه منتشر شد"
-        )
+    else:
+        await context.bot.send_message(uid, "❌ پیامت رد شد")
+        await q.edit_message_text("❌ رد شد")
 
-        await q.edit_message_text("✅ پیام ارسال شد")
+def main():
+    app = Application.builder().token(BOT_TOKEN).build()
 
-    elif action == "reject":
-        await context.bot.send_message(
-            chat_id=uid,
-            text="❌ پیامت رد شد"
-        )
-        await q.edit_message_text("❌ پیام رد شد")
+    app.add_handler(CommandHandler("start", start))
+    app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, text_handler))
+    app.add_handler(CallbackQueryHandler(buttons))
 
-# اپلیکیشن سراسری (برای webhook)
-application = Application.builder().token(BOT_TOKEN).build()
+    # 🔥 وبهوک واقعی
+    app.run_webhook(
+        listen="0.0.0.0",
+        port=PORT,
+        webhook_url="https://nashenas-71cn.onrender.com/webhook",
+        url_path="webhook"
+    )
 
-application.add_handler(CommandHandler("start", start))
-application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_text))
-application.add_handler(CallbackQueryHandler(buttons))
+if __name__ == "__main__":
+    main()
